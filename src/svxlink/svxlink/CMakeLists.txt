@@ -94,6 +94,16 @@ foreach(logic_name ${SVXLINK_LOGIC_CORES})
   #target_link_libraries(${logic_name}Logic ${LIBS})
 endforeach()
 
+# Build the LinkManager unit test (svxlink core sources minus the main in
+# svxlink.cpp, plus the test driver)
+add_executable(LinkManagerTest LinkManagerTest.cpp
+  MsgHandler.cpp Module.cpp Logic.cpp EventHandler.cpp
+  LinkManager.cpp CmdParser.cpp QsoRecorder.cpp DtmfDigitHandler.cpp
+  ${VERSION_DEPENDS})
+target_link_libraries(LinkManagerTest ${LIBS})
+set_target_properties(LinkManagerTest PROPERTIES ENABLE_EXPORTS on)
+add_test(NAME LinkManagerTest COMMAND LinkManagerTest)
+
 # Build the CmdParser unit test (pure logic, only needs sigc++ via asynccore)
 add_executable(CmdParserTest CmdParserTest.cpp CmdParser.cpp)
 target_link_libraries(CmdParserTest asynccore)
@@ -108,6 +118,11 @@ add_test(NAME DtmfDigitHandlerTest COMMAND DtmfDigitHandlerTest)
 add_test(NAME tcl_event_scripts_load
   COMMAND ${CMAKE_COMMAND} -E env python3
           ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/test_tcl_loads.py)
+
+# Integration tests for non-upstream audio modes
+add_test(NAME audio_modes
+  COMMAND ${CMAKE_COMMAND} -E env python3
+          ${CMAKE_CURRENT_SOURCE_DIR}/../../../tests/test_audio_modes.py)
 
 # Generate config file with correct paths
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/svxlink.conf.in

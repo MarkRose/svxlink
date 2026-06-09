@@ -245,6 +245,7 @@ LocalTx::LocalTx(Config& cfg, const string& name)
     dtmf_encoder(0), selector(0), dtmf_valve(0), mixer(0), hdlc_framer(0),
     fsk_mod(0), /*fsk_valve(0),*/ input_handler(0), ptt_ctrl(0),
     audio_valve(0), siglev_sine_gen(0), ptt_hangtimer(0), ptt(0),
+    ctcss_ptt(0),
     last_rx_id(Rx::ID_UNKNOWN), fsk_first_packet_transmitted(false),
     hdlc_framer_ib(0), fsk_mod_ib(0), ctrl_pty(0), audio_dev_keep_open(false)
 {
@@ -272,6 +273,7 @@ LocalTx::~LocalTx(void)
   
   delete txtot;
   delete ptt;
+  delete ctcss_ptt;
   delete sine_gen;
   delete siglev_sine_gen;
   delete ptt_hangtimer;
@@ -308,6 +310,26 @@ bool LocalTx::initialize(void)
   if ((ptt == 0) || (!ptt->initialize(cfg, name())))
   {
     return false;
+  }
+
+    // Optional CTCSS encode-enable output line. This drives an external/hardware
+    // CTCSS encoder on a separate GPIO (or other PTT-style) output, keyed while
+    // a CTCSS tone should be transmitted. It is configured exactly like a PTT,
+    // in the section named by CTCSS_PTT, so it inherits all PTT backends
+    // (GPIO, GPIOD, serial, ...) and the active-low '!' prefix. The line
+    // follows the TX_CTCSS decision, so e.g. scheduled announcements (which use
+    // the SCHEDULED category) do not assert it.
+  string ctcss_ptt_name;
+  if (cfg.getValue(name(), "CTCSS_PTT", ctcss_ptt_name) &&
+      !ctcss_ptt_name.empty())
+  {
+    ctcss_ptt = PttFactoryBase::createNamedPtt(cfg, ctcss_ptt_name);
+    if ((ctcss_ptt == 0) || (!ctcss_ptt->initialize(cfg, ctcss_ptt_name)))
+    {
+      cerr << "*** ERROR: Could not initialize CTCSS encode PTT \""
+           << ctcss_ptt_name << "\" for transmitter " << name() << ".\n";
+      return false;
+    }
   }
 
   int ptt_hangtime = 0;
@@ -778,6 +800,7 @@ void LocalTx::enableCtcss(bool enable)
   {
     sine_gen->enable(enable);
   }
+  updateCtcssPtt();
 } /* LocalTx::enableCtcss */
 
 
@@ -975,13 +998,26 @@ void LocalTx::transmit(bool do_transmit)
 
     setIsTransmitting(false);
   }
-  
+
+    // Key/unkey the CTCSS encode line to track the transmit state.
+  updateCtcssPtt();
+
   if (!setPtt(isTransmitting() && !tx_timeout_occured, true))
   {
     perror("setPin");
   }
-  
+
 } /* LocalTx::transmit */
+
+
+void LocalTx::updateCtcssPtt(void)
+{
+  if (ctcss_ptt != 0)
+  {
+      // The CTCSS encoder is keyed only while actually transmitting a tone.
+    ctcss_ptt->setTxOn(isTransmitting() && ctcss_enable);
+  }
+} /* LocalTx::updateCtcssPtt */
 
 
 

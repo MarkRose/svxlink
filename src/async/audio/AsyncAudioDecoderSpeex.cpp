@@ -177,8 +177,24 @@ bool AudioDecoderSpeex::enhancerEnabled(void) const
 
 void AudioDecoderSpeex::writeEncodedSamples(void *buf, int size)
 {
+    // "samples[frame_size]" is a VLA but frame_size is fixed by the Speex mode
+    // (queried in the constructor), not by the caller, so it is safe and left
+    // as-is. However "size" is derived from network input (e.g. the Reflector
+    // UDP audio path) and is passed unchecked to speex_bits_read_from(). Reject
+    // non-positive or implausibly large sizes before handing the data to Speex.
+    // MAX_ENCODED_FRAME_SIZE is one second of audio at the internal sample
+    // rate, which is far beyond any real Speex frame but a sane upper bound.
+  static const int MAX_ENCODED_FRAME_SIZE = INTERNAL_SAMPLE_RATE;
+  if ((size <= 0) || (size > MAX_ENCODED_FRAME_SIZE))
+  {
+    std::cerr << "*** WARNING: AudioDecoderSpeex received an encoded frame with "
+                 "an out of range size (" << size << " bytes). Discarding it."
+              << std::endl;
+    return;
+  }
+
   char *ptr = (char *)buf;
-  
+
   speex_bits_read_from(&bits, ptr, size);
   float samples[frame_size];
 #if SPEEX_MAJOR > 1 || (SPEEX_MAJOR == 1 && SPEEX_MINOR >= 1)

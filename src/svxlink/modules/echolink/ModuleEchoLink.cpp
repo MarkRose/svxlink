@@ -108,7 +108,32 @@ using namespace EchoLink;
  *
  ****************************************************************************/
 
+// Defined in EventHandler.cpp. Whitelist filters a string down to the
+// characters valid in an amateur radio callsign, to guard against TCL
+// command injection when interpolating untrusted data into a TCL event
+// string.
+extern std::string tclSafeCallsign(const std::string& str);
 
+namespace {
+  // Return the QSOs that are selectable for "disconnect by call", in the
+  // same order as they are presented to the user. Disconnected QSOs are
+  // excluded since they are not part of the numbered selection list, so
+  // this function must be used both when rendering the list and when
+  // resolving the user's numeric selection to keep the two in sync.
+  vector<QsoImpl*> dbcSelectableQsos(const vector<QsoImpl*>& qsos)
+  {
+    vector<QsoImpl*> selectable;
+    for (vector<QsoImpl*>::const_iterator it = qsos.begin();
+         it != qsos.end(); ++it)
+    {
+      if ((*it)->currentState() != Qso::STATE_DISCONNECTED)
+      {
+        selectable.push_back(*it);
+      }
+    }
+    return selectable;
+  }
+};
 
 
 /****************************************************************************
@@ -1233,7 +1258,7 @@ void ModuleEchoLink::onInfoMsgReceived(QsoImpl *qso, const string& msg)
   replaceAll(escaped, "}", "\\}");
   stringstream ss;
     // FIXME: This TCL specific code should not be here
-  ss << "info_received \"" << qso->remoteCallsign()
+  ss << "info_received \"" << tclSafeCallsign(qso->remoteCallsign())
      << "\" [subst -nocommands -novariables {";
   ss << escaped;
   ss << "}]";
@@ -1422,6 +1447,14 @@ void ModuleEchoLink::createOutgoingConnection(const StationData &station)
 	ss << "already_connected_to " << station.callsign();
 	processEvent(ss.str());
 	return;
+      }
+      if ((*it)->connectionRejected())
+      {
+        // Do not reuse a QSO object that carries a stale reject_qso flag
+        // from a previous rejection. Fall through and create a fresh
+        // object instead so that the new outgoing connection is not
+        // silently suppressed.
+        break;
       }
       qso = *it;
       qsos.erase(it);
@@ -1735,15 +1768,13 @@ void ModuleEchoLink::disconnectByCallsign(const string &cmd)
     return;
   }
 
+  vector<QsoImpl*> selectable(dbcSelectableQsos(qsos));
   stringstream ss;
   ss << "dbc_list [list";
   vector<QsoImpl*>::iterator it;
-  for (it=qsos.begin(); it!=qsos.end(); ++it)
+  for (it=selectable.begin(); it!=selectable.end(); ++it)
   {
-    if ((*it)->currentState() != Qso::STATE_DISCONNECTED)
-    {
-    	ss << " " << (*it)->remoteCallsign();
-    }
+    ss << " " << (*it)->remoteCallsign();
   }
   ss << "]";
   processEvent(ss.str());
@@ -1766,13 +1797,14 @@ void ModuleEchoLink::handleDisconnectByCall(const string& cmd)
   }
   
   unsigned idx = static_cast<unsigned>(atoi(cmd.c_str()));
+  vector<QsoImpl*> selectable(dbcSelectableQsos(qsos));
   stringstream ss;
 
   if (idx == 0)
   {
     ss << "dbc_list [list";
     vector<QsoImpl*>::const_iterator it;
-    for (it = qsos.begin(); it != qsos.end(); ++it)
+    for (it = selectable.begin(); it != selectable.end(); ++it)
     {
       ss << " " << (*it)->remoteCallsign();
     }
@@ -1782,7 +1814,7 @@ void ModuleEchoLink::handleDisconnectByCall(const string& cmd)
     return;
   }
 
-  if (idx > qsos.size())
+  if (idx > selectable.size())
   {
     ss << "dbc_index_out_of_range " << idx;
     processEvent(ss.str());
@@ -1790,7 +1822,7 @@ void ModuleEchoLink::handleDisconnectByCall(const string& cmd)
     return;
   }
 
-  qsos[idx-1]->disconnect();
+  selectable[idx-1]->disconnect();
   delete dbc_timer;
   dbc_timer = 0;
   state = STATE_NORMAL;

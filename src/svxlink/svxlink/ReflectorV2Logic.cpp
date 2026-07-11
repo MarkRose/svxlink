@@ -96,6 +96,12 @@ using namespace Async;
  *
  ****************************************************************************/
 
+// Defined in EventHandler.cpp. Whitelist filters a string down to the
+// characters valid in an amateur radio callsign, to guard against TCL
+// command injection when interpolating untrusted data into a TCL event
+// string.
+extern std::string tclSafeCallsign(const std::string& str);
+
 
 
 /****************************************************************************
@@ -834,6 +840,13 @@ void ReflectorLogic::onDisconnected(TcpConnection *con,
 void ReflectorLogic::onFrameReceived(FramedTcpConnection *con,
                                      std::vector<uint8_t>& data)
 {
+  if (data.empty())
+  {
+    std::cerr << "*** ERROR[" << name()
+              << "]: Received an empty TCP frame" << std::endl;
+    disconnect();
+    return;
+  }
   char *buf = reinterpret_cast<char*>(&data.front());
   int len = data.size();
 
@@ -1228,7 +1241,7 @@ void ReflectorLogic::handleMsgTalkerStart(std::istream& is)
   }
 
   std::ostringstream ss;
-  ss << "talker_start " << msg.tg() << " " << msg.callsign();
+  ss << "talker_start " << msg.tg() << " " << tclSafeCallsign(msg.callsign());
   processEvent(ss.str());
 } /* ReflectorLogic::handleMsgTalkerStart */
 
@@ -1247,7 +1260,7 @@ void ReflectorLogic::handleMsgTalkerStop(std::istream& is)
        << msg.callsign() << endl;
 
   std::ostringstream ss;
-  ss << "talker_stop " << msg.tg() << " " << msg.callsign();
+  ss << "talker_stop " << msg.tg() << " " << tclSafeCallsign(msg.callsign());
   processEvent(ss.str());
 } /* ReflectorLogic::handleMsgTalkerStop */
 
@@ -1552,7 +1565,11 @@ void ReflectorLogic::handleTimerTick(Async::Timer *t)
     }
   }
 
-  if (--m_udp_heartbeat_tx_cnt == 0)
+  if (m_udp_heartbeat_tx_cnt > 0)
+  {
+    --m_udp_heartbeat_tx_cnt;
+  }
+  if (m_udp_heartbeat_tx_cnt == 0)
   {
     sendUdpMsg(MsgUdpHeartbeat());
   }

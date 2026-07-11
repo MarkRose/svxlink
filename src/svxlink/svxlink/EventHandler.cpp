@@ -36,6 +36,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <cctype>
 
 
 /****************************************************************************
@@ -109,6 +110,41 @@ using namespace Async;
  *
  ****************************************************************************/
 
+
+
+/****************************************************************************
+ *
+ * Exported Global functions
+ *
+ ****************************************************************************/
+
+/**
+ * @brief   Make a string safe for interpolation into a TCL event string
+ * @param   str The string to make TCL safe
+ * @return  Returns a copy of \em str with all characters not valid in an
+ *          amateur radio callsign removed
+ *
+ * This function whitelist filters a string down to the characters that
+ * are valid in an amateur radio callsign (alphanumerics, '-' and '/').
+ * It must be used whenever untrusted data, e.g. a callsign received from
+ * a remote reflector server or EchoLink peer, is interpolated into a TCL
+ * event string before being passed to EventHandler::processEvent, to
+ * guard against TCL command injection.
+ */
+string tclSafeCallsign(const string& str)
+{
+  string safe;
+  safe.reserve(str.size());
+  for (string::const_iterator it = str.begin(); it != str.end(); ++it)
+  {
+    if (isalnum(static_cast<unsigned char>(*it)) || (*it == '-') ||
+        (*it == '/'))
+    {
+      safe += *it;
+    }
+  }
+  return safe;
+} /* tclSafeCallsign */
 
 
 /****************************************************************************

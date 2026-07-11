@@ -521,8 +521,19 @@ void NetRx::handleMsg(Msg *msg)
       if ((muteState() == Rx::MUTE_NONE) && sql_is_open)
       {
 	MsgAudio *audio_msg = reinterpret_cast<MsgAudio*>(msg);
+	int audio_size = audio_msg->size();
+	  // Reject a payload length that is out of range or inconsistent with
+	  // the number of bytes actually received for this message, otherwise
+	  // the decoder would read past the receive buffer.
+	if ((audio_size < 0) || (audio_size > MsgAudio::BUFSIZE) ||
+	    (msg->size() != sizeof(Msg) + sizeof(int) + audio_size))
+	{
+	  cerr << name() << ": *** ERROR: Invalid MsgAudio size received. "
+	          "Ignoring.\n";
+	  break;
+	}
 	unflushed_samples = true;
-        audio_dec->writeEncodedSamples(audio_msg->buf(), audio_msg->size());
+        audio_dec->writeEncodedSamples(audio_msg->buf(), audio_size);
       }
       break;
     }

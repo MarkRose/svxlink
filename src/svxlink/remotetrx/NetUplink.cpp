@@ -898,7 +898,14 @@ void NetUplink::signalLevelUpdated(float siglev)
 void NetUplink::forceDisconnect(void)
 {
   con->disconnect();
-  clientDisconnected(con, TcpConnection::DR_ORDERED_DISCONNECT);
+
+    // TcpConnection::disconnect() intentionally does not emit the
+    // "disconnected" signal (it just closes the socket), so emit it
+    // ourselves. This drives the normal disconnect path, including
+    // TcpServer<>::onDisconnected(), which is what actually removes and
+    // frees the TcpServerConnection object. Without this, a server
+    // initiated disconnect would leak the connection object.
+  con->disconnected(con, TcpConnection::DR_ORDERED_DISCONNECT);
 } /* NetUplink::forceDisconnect */
 
 

@@ -65,3 +65,10 @@ if (BUILD_STATIC_LIBS)
   install(TARGETS ${LIBNAME}_static DESTINATION ${LIB_INSTALL_DIR})
 endif(BUILD_STATIC_LIBS)
 install(FILES ${INSTALL_INC} DESTINATION ${SVX_INCLUDE_INSTALL_DIR})
+
+# RtPacket unit test. EchoLinkQsoTest.cpp has no main() of its own (it is
+# compiled into echolib_test above), so this directory is not glob-registered;
+# RtPacketTest is registered explicitly instead.
+add_executable(RtPacketTest RtPacketTest.cpp rtpacket.cpp)
+target_link_libraries(RtPacketTest ${LIBS} echolib asynccpp asyncaudio asynccore)
+add_test(NAME RtPacketTest COMMAND RtPacketTest)

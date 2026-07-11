@@ -42,6 +42,7 @@ Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 #include <algorithm>
 #include <queue>
 #include <regex.h>
+#include <stdexcept>
 
 
 /****************************************************************************
@@ -760,7 +761,10 @@ void ModuleMetarInfo::dtmfCmdReceived(const string& cmd)
         //pos = (cmdit->substr(0,1)).c_str();
         //spos= mypad[pos[0]];
         string spos = mypad[(*cmdit)[0]];
-        icao += spos.substr(cmdit->length(),1);
+        if (cmdit->length() < spos.length())
+        {
+          icao += spos.substr(cmdit->length(),1);
+        }
      }
   }
 
@@ -926,7 +930,7 @@ void ModuleMetarInfo::onData(std::string metarinput, size_t count)
         cout << "XML-METAR: " << metar << endl;
       }
 
-      if (met_utc.length() == 20 && !isvalidUTC(met_utc))
+      if (met_utc.length() != 20 || !isvalidUTC(met_utc))
       {
         stringstream temp;
         cout << "Metar information outdated" << endl;
@@ -957,6 +961,12 @@ void ModuleMetarInfo::onData(std::string metarinput, size_t count)
       cout << "ERROR 404 from webserver -> no such airport\n";
       temp << "no_such_airport";
       say(temp);
+      return;
+    }
+
+    if (values.size() < 2)
+    {
+      cout << "ERROR: wrong Metarfile format, too few lines received" << endl;
       return;
     }
 
@@ -1053,6 +1063,24 @@ int ModuleMetarInfo::handleMetar(std::string input)
    splitStr(values, input, " ");
    StrList::iterator it = values.begin();
 
+   // Advance "it" to the next token, used where a token's value is carried
+   // in the following token (e.g. PEAKWIND, WINDSHIFT, RMKVISIBILITY).
+   // If there is no next token, set endflag and leave "it" untouched so
+   // that the loop's trailing "it++" does not step past values.end().
+   auto advanceOrEnd = [&it, &values, &endflag]() -> bool
+   {
+     StrList::iterator next = it;
+     ++next;
+     if (next == values.end())
+     {
+       endflag = true;
+       return false;
+     }
+     it = next;
+     return true;
+   };
+
+   try {
    while (it != values.end() && !endflag) {
 
      current = *it;
@@ -1222,7 +1250,7 @@ int ModuleMetarInfo::handleMetar(std::string input)
             break;
 
          case PEAKWIND:
-            it++;
+            if (!advanceOrEnd()) break;
             current = *it;
             if (getPeakWind(tempstr, current))
             {
@@ -1236,7 +1264,7 @@ int ModuleMetarInfo::handleMetar(std::string input)
             break;
 
          case WINDSHIFT:
-            it++;
+            if (!advanceOrEnd()) break;
             current = *it;
             temp << "windshift " << current;
             say(temp);
@@ -1248,7 +1276,7 @@ int ModuleMetarInfo::handleMetar(std::string input)
             break;
 
          case RMKVISIBILITY:
-            it++;
+            if (!advanceOrEnd()) break;
             current = *it;
 /*          temp << "rmk_visibility ";
             // check if a direction is given?
@@ -1304,9 +1332,13 @@ int ModuleMetarInfo::handleMetar(std::string input)
             break;
 
          case TEMPOOBSCURATION:
-            temp << "tempo_obscuration " << current.substr(-4,2)
-                 << " " << current.substr(-2,2);
-            say(temp);
+            if (current.length() >= 4)
+            {
+              temp << "tempo_obscuration "
+                   << current.substr(current.length()-4,2)
+                   << " " << current.substr(current.length()-2,2);
+              say(temp);
+            }
             break;
 
          case TEMPINRMK:
@@ -1387,6 +1419,13 @@ int ModuleMetarInfo::handleMetar(std::string input)
      }
   //   cout << current << endl;
      it++;
+   }
+   } /* try */
+   catch (const std::exception &e)
+   {
+     cout << "*** ERROR: Exception while parsing METAR token \"" << current
+          << "\": " << e.what() << endl;
+     return 0;
    }
    return 1;
 }
@@ -1493,6 +1532,7 @@ std::string ModuleMetarInfo::getCloudType(std::string token)
 
    while (token.length() > 0)
    {
+     bool matched = false;
      for (a=0; a<15; a++)
      {
         if (token.find(clouds[a],0) != string::npos)
@@ -1501,7 +1541,12 @@ std::string ModuleMetarInfo::getCloudType(std::string token)
            token.erase(0,clouds[a].length());
            ss << token.substr(0,1);
            token.erase(0,1);
+           matched = true;
         }
+     }
+     if (!matched)
+     {
+        break;
      }
    }
 
@@ -1531,6 +1576,8 @@ bool ModuleMetarInfo::getPeakWind(std::string &retval, std::string token)
    if (token.length() < 8 || token.length() > 11) return false;
 
    splitStr(tlist, token, "/");
+   if (tlist.size() < 2) return false;
+
    ss << tlist[0].substr(0,3) << " ";   // direction
    ss << tlist[0].substr(3,2) << " ";   // velocity
 
@@ -1620,6 +1667,8 @@ std::string ModuleMetarInfo::getTempTime(std::string token)
 std::string ModuleMetarInfo::getSlp(std::string token)
 {
     stringstream ss;
+
+    if (token.length() < 6) return "";
 
     (atoi(token.substr(3,1).c_str()) > 6) ? ss << "9" : ss << "10";
     ss << token.substr(3,2) << "." << token.substr(5,1);
@@ -2081,7 +2130,10 @@ void ModuleMetarInfo::isTime(std::string &retval, std::string token)
    std::map <string, string>::iterator tt;
 
    tt = shdesig.find(token.substr(0,2));  // fm -> from,  tl -> until
-   ss << tt->second;
+   if (tt != shdesig.end())
+   {
+     ss << tt->second;
+   }
    ss << " " << token.substr(2,4);
    retval = ss.str();
 } /* isTime */

@@ -187,8 +187,34 @@ void AudioDecoderOpus::reset(void)
 
 void AudioDecoderOpus::writeEncodedSamples(void *buf, int size)
 {
+    // The "size" argument is the length of an Opus packet taken from network
+    // input (e.g. the Reflector UDP audio path passes the datagram payload
+    // length straight through). The original implementation derived a stack
+    // VLA, "float samples[frame_cnt*frame_size]", from fields the attacker
+    // controls inside the packet, and also passed the unchecked "size" to
+    // opus_decode_float(). A large size could blow the stack and a negative
+    // size is undefined behaviour. Reject implausible packet sizes up front and
+    // decode into a fixed-size stack buffer, always telling Opus the true
+    // capacity so it can never write past the buffer.
+    //
+    // MAX_ENCODED_FRAME_SIZE matches the encoder side's output buffer
+    // (output_buf[4000] in AudioEncoderOpus), which is the size recommended by
+    // the Opus documentation as an upper bound for a single packet.
+    // MAX_DECODED_SAMPLES is the largest number of mono samples a single Opus
+    // packet can decode to: Opus limits a packet to 120 ms of audio, so at the
+    // internal sample rate this is an upper bound that no valid packet exceeds.
+  static const int MAX_ENCODED_FRAME_SIZE = 4000;
+  static const int MAX_DECODED_SAMPLES = 120 * INTERNAL_SAMPLE_RATE / 1000;
+  if ((size <= 0) || (size > MAX_ENCODED_FRAME_SIZE))
+  {
+    std::cerr << "*** WARNING: AudioDecoderOpus received an encoded frame with "
+                 "an out of range size (" << size << " bytes). Discarding it."
+              << std::endl;
+    return;
+  }
+
   unsigned char *packet = reinterpret_cast<unsigned char *>(buf);
-  
+
   int frame_cnt = opus_packet_get_nb_frames(packet, size);
   if (frame_cnt == 0)
   {
@@ -225,9 +251,21 @@ void AudioDecoderOpus::writeEncodedSamples(void *buf, int size)
     return;
   }
   //cout << "### frame_cnt=" << frame_cnt << " frame_size=" << frame_size;
-  float samples[frame_cnt*frame_size];
+    // A well-formed Opus packet decodes to at most MAX_DECODED_SAMPLES mono
+    // samples. Guard against malformed packets whose advertised frame_cnt /
+    // frame_size would exceed that, then decode into a fixed-size stack buffer,
+    // passing the real buffer capacity to opus_decode_float() as the output
+    // frame-size limit so it can never overrun the buffer.
+  if ((frame_cnt * frame_size) > MAX_DECODED_SAMPLES)
+  {
+    std::cerr << "*** WARNING: AudioDecoderOpus packet advertises more samples "
+                 "than a valid Opus packet can contain. Discarding it."
+              << std::endl;
+    return;
+  }
+  float samples[MAX_DECODED_SAMPLES];
   frame_size = opus_decode_float(dec, packet, size, samples,
-                                 frame_cnt*frame_size, 0);
+                                 MAX_DECODED_SAMPLES, 0);
   //cout << " " << frame_size << endl;
   if (frame_size > 0)
   {

@@ -952,6 +952,8 @@ void ReflectorClient::handleNodeInfo(std::istream& is)
     m_status = &(m_reflector->clientStatus(m_callsign));
     auto& status = *m_status;
     status.clear();
+    m_json_rx_map.clear();
+    m_json_tx_map.clear();
     std::istringstream is(jsonstr);
     is >> status;
 

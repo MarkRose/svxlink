@@ -77,6 +77,7 @@ using namespace EchoLink;
  *
  ****************************************************************************/
 
+#define SDES_PACKET_SIZE 256
 
 
 /****************************************************************************
@@ -272,7 +273,7 @@ void AprsUdpClient::sendLocationInfo(Timer *t)
 
   if (sock.initOk())
   {
-    char sdes_packet[256];
+    char sdes_packet[SDES_PACKET_SIZE];
     int sdes_len = buildSdesPacket(sdes_packet);
 
     //std::cout << "### AprsUdpClient::sendLocationInfo" << std::endl;
@@ -300,12 +301,20 @@ void AprsUdpClient::dnsResultsReady(DnsLookup& dns_lookup)
 } /* AprsUdpClient::dnsResultsReady */
 
 
-#define addText(block, text) \
+#define addText(block, text, end) \
   do { \
-    int sl = strlen(text); \
-    *block++ = sl; \
-    memcpy(block, text, sl); \
-    block += sl; \
+    if ((block) < (end)) \
+    { \
+      int sl = strlen(text); \
+      if ((block) + 1 + sl > (end)) \
+      { \
+        sl = (end) - (block) - 1; \
+        if (sl < 0) sl = 0; \
+      } \
+      *block++ = sl; \
+      memcpy(block, text, sl); \
+      block += sl; \
+    } \
   } while (0)
 
 
@@ -315,6 +324,7 @@ int AprsUdpClient::buildSdesPacket(char *p)
   struct tm utc;
   char pos[128], info[80], tmp[256];
   char *ap;
+  char *end = p + SDES_PACKET_SIZE;
   int ver, len;
 
     // Evaluate directory status
@@ -322,24 +332,24 @@ int AprsUdpClient::buildSdesPacket(char *p)
   {
     case StationData::STAT_OFFLINE:
     case StationData::STAT_UNKNOWN:
-      sprintf(info, " Off @");
+      snprintf(info, sizeof(info), " Off @");
       break;
 
     case StationData::STAT_BUSY:
-      sprintf(info, " Busy ");
+      snprintf(info, sizeof(info), " Busy ");
       break;
 
     case StationData::STAT_ONLINE:
       switch(num_connected)
       {
         case 0:
-          sprintf(info, " On  @");
+          snprintf(info, sizeof(info), " On  @");
           break;
         case 1:
-          sprintf(info, "=%s ", curr_call.c_str());
+          snprintf(info, sizeof(info), "=%s ", curr_call.c_str());
           break;
         default:
-          sprintf(info, "+%s ", curr_call.c_str());
+          snprintf(info, sizeof(info), "+%s ", curr_call.c_str());
           break;
       }
       break;
@@ -350,7 +360,7 @@ int AprsUdpClient::buildSdesPacket(char *p)
   gmtime_r(&update, &utc);
 
     // Geographic position
-  sprintf(pos, "%02d%02d.%02d%cE%03d%02d.%02d%c",
+  snprintf(pos, sizeof(pos), "%02d%02d.%02d%cE%03d%02d.%02d%c",
                loc_cfg.lat_pos.deg, loc_cfg.lat_pos.min,
                (loc_cfg.lat_pos.sec * 100) / 60, loc_cfg.lat_pos.dir,
                loc_cfg.lon_pos.deg, loc_cfg.lon_pos.min,
@@ -370,13 +380,19 @@ int AprsUdpClient::buildSdesPacket(char *p)
     // At this point ap points to the beginning of the first SDES item
   ap = p + 8;
 
-  *ap++ = RTCP_SDES_CNAME;
-  sprintf(tmp, "%s-%s/%d", loc_cfg.mycall.c_str(), loc_cfg.prefix.c_str(),
-                           getPasswd(loc_cfg.mycall));
-  addText(ap, tmp);
+  if (ap < end)
+  {
+    *ap++ = RTCP_SDES_CNAME;
+  }
+  snprintf(tmp, sizeof(tmp), "%s-%s/%d", loc_cfg.mycall.c_str(),
+                           loc_cfg.prefix.c_str(), getPasswd(loc_cfg.mycall));
+  addText(ap, tmp, end);
 
-  *ap++ = RTCP_SDES_LOC;
-  sprintf(tmp, ")EL-%.6s!%s0PHG%c%c%c%c/%06d/%03d%6s%02d%02d\r\n",
+  if (ap < end)
+  {
+    *ap++ = RTCP_SDES_LOC;
+  }
+  snprintf(tmp, sizeof(tmp), ")EL-%.6s!%s0PHG%c%c%c%c/%06d/%03d%6s%02d%02d\r\n",
                loc_cfg.mycall.c_str(), pos,
                getPowerParam(loc_cfg.power),
                getHeightParam(loc_cfg.height),
@@ -384,13 +400,16 @@ int AprsUdpClient::buildSdesPacket(char *p)
                getDirectionParam(loc_cfg.beam_dir),
                loc_cfg.frequency, getToneParam(),
                info, utc.tm_hour, utc.tm_min);
-  addText(ap, tmp);
+  addText(ap, tmp, end);
 
-  *ap++ = RTCP_SDES_END;
-  *ap++ = 0;
+  if (ap + 2 <= end)
+  {
+    *ap++ = RTCP_SDES_END;
+    *ap++ = 0;
+  }
 
     // Some data padding for alignment
-  while ((ap - p) & 3)
+  while (((ap - p) & 3) && (ap < end))
   {
     *ap++ = 0;
   }
